@@ -1,0 +1,1412 @@
+---
+title: "Sheerin_et_al_Co_inf_analysis_revised"
+output: html_document
+date: "2023-12-14"
+---
+
+```{r setup, include=FALSE}
+# Set working directory
+setwd("path/to/wd")
+
+# Load libraries
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(patchwork)
+  library(dplyr)
+  library(Seurat)
+  library(readr)
+  library(ggpubr)
+  library(SingleCellExperiment)
+  library(scuttle)
+  library(SingleR)
+  library(celldex)
+  library(DT)
+  library(scCustomize)
+  library(UCell)
+  library(HGNChelper)
+  library(openxlsx)
+})
+```
+
+```{r load data}
+# Read in matrices
+dT_UN_24H <- read.table("path/to/UN_24H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_UN_24H <- read.table("path/to/UN_24H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_TB_24H <- read.table("path/to/TB_24H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_TB_24H <- read.table("path/to/TB_24H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_CO_24H <- read.table("path/to/CO_24H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_CO_24H <- read.table("path/to/CO_24H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_SARS_24H <- read.table("path/to/SARS_24H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_SARS_24H <- read.table("path/to/SARS_24H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_UN_96H <- read.table("path/to/UN_96H_20221031_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_UN_96H <- read.table("path/to/UN_96H_20221031_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_TB_96H <- read.table("path/to/TB_96H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_TB_96H <- read.table("path/to/TB_96H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_CO_96H <- read.table("path/to/CO_96H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_CO_96H <- read.table("path/to/CO_96H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dT_SARS_96H <- read.table("path/to/SARS_96H_20221103_TCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+dR_SARS_96H <- read.table("path/to/SARS_96H_20221103_RCM.tsv", header=1, row.names=1, check.names=FALSE, sep="\t", stringsAsFactors=FALSE)
+
+# Make sure order of read info matches order of TCM matrix
+dR_UN24 <- dR_UN24[, match(colnames(dR_UN24), colnames(dT_UN24))]
+dR_TB24 <- dR_TB24[, match(colnames(dR_TB24), colnames(dT_TB24))]
+dR_CO24 <- dR_CO24[, match(colnames(dR_CO24), colnames(dT_CO24))]
+dR_SARS24 <- dR_SARS24[, match(colnames(dR_SARS24), colnames(dT_SARS24))]
+dR_UN96 <- dR_UN96[, match(colnames(dR_UN96), colnames(dT_UN96))]
+dR_TB96 <- dR_TB96[, match(colnames(dR_TB96), colnames(dT_TB96))]
+dR_CO96 <- dR_CO96[, match(colnames(dR_CO96), colnames(dT_CO96))]
+dR_SARS96 <- dR_SARS96[, match(colnames(dR_SARS96), colnames(dT_SARS96))]
+
+# Create and save Seurat objects
+seurat_objects <- list(
+  UN24 = CreateSeuratObject(counts = dT_UN24, project = "UN24"),
+  TB24 = CreateSeuratObject(counts = dT_TB24, project = "TB24"),
+  CO24 = CreateSeuratObject(counts = dT_CO24, project = "CO24"),
+  SARS24 = CreateSeuratObject(counts = dT_SARS24, project = "SARS24"),
+  UN96 = CreateSeuratObject(counts = dT_UN96, project = "UN96"),
+  TB96 = CreateSeuratObject(counts = dT_TB96, project = "TB96"),
+  CO96 = CreateSeuratObject(counts = dT_CO96, project = "CO96"),
+  SARS96 = CreateSeuratObject(counts = dT_SARS96, project = "SARS96")
+)
+
+for (name in names(seurat_objects)) {
+  saveRDS(seurat_objects[[name]], paste0(name, ".rds"))
+}
+```
+
+```{r demultiplex by geno}
+# Demultiplex based on donor IDs
+dI_UN_24H <- read.table("path/to/UN_24H_donor_ids.tsv", header = T, row.names = 1)
+dI_TB_24H <- read.table("path/to/TB_24H_donor_ids.tsv", header = T, row.names = 1)
+dI_CO_24H <- read.table("path/to/CO_24H_donor_ids.tsv", header = T, row.names = 1)
+dI_SARS_24H <- read.table("path/to/SARS_24H_donor_ids.tsv", header = T, row.names = 1)
+dI_UN_96H <- read.table("path/to/UN_96H_donor_ids.tsv", header = T, row.names = 1)
+dI_TB_96H <- read.table("path/to/TB_96H_donor_ids.tsv", header = T, row.names = 1)
+dI_CO_96H <- read.table("path/to/CO_96H_donor_ids.tsv", header = T, row.names = 1)
+dI_SARS_96H <- read.table("path/to/SARS_96H_donor_ids.tsv", header = T, row.names = 1)
+
+UN24@meta.data <- merge(UN24@meta.data, dI_UN_24H, by = "row.names", all.x = TRUE)
+TB24@meta.data <- merge(TB24@meta.data, dI_TB_24H, by = "row.names", all.x = TRUE)
+CO24@meta.data <- merge(CO24@meta.data, dI_CO_24H, by = "row.names", all.x = TRUE)
+SARS24@meta.data <- merge(SARS24@meta.data, dI_SARS_24H, by = "row.names", all.x = TRUE)
+UN96@meta.data <- merge(UN96@meta.data, dI_UN_96H, by = "row.names", all.x = TRUE)
+TB96@meta.data <- merge(TB96@meta.data, dI_TB_96H, by = "row.names", all.x = TRUE)
+CO96@meta.data <- merge(CO96@meta.data, dI_CO_96H, by = "row.names", all.x = TRUE)
+SARS96@meta.data <- merge(SARS96@meta.data, dI_SARS_96H, by = "row.names", all.x = TRUE)
+```
+
+```{r merge seurat}
+# Merge Seurat objects into a single object
+CO_INF <- Merge_Seurat_List(list_seurat = seurat_objects, add.cell.ids = names(seurat_objects))
+```
+
+```{r quality control}
+# QC analysis
+CO_INF <- Add_Mito_Ribo_Seurat(seurat_object = CO_INF, species = "Human", overwrite = T)
+median_stats <- Median_Stats(seurat_object = CO_INF, group_by_var = "orig.ident")
+
+QC_Plot_UMIvsGene(seurat_object = CO_INF, low_cutoff_gene = 50, high_cutoff_gene = 1000, low_cutoff_UMI = 50,
+                  high_cutoff_UMI = 4000)
+
+plot1 <- FeatureScatter(CO_INF, feature1 = "nCount_RNA", feature2 = "percent_mito")
+plot2 <- FeatureScatter(CO_INF, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+
+metadata <- CO_INF_int@meta.data
+subset_24 <- metadata[metadata$orig.ident %in% c("UN24", "TB24", "CO24", "SARS24"), ]
+subset_96 <- metadata[metadata$orig.ident %in% c("UN96", "TB96", "CO96", "SARS96"), ]
+
+p_values_24 <- as.data.frame(pairwise.t.test(subset_24$percent_mito, subset_24$orig.ident, p.adjust.method = "BH")$p.value)
+p_values_96 <- as.data.frame(pairwise.t.test(subset_96$percent_mito, subset_96$orig.ident, p.adjust.method = "BH")$p.value)
+
+ggplot(subset_24, aes(x = `orig.ident`, y = percent_mito, fill = `orig.ident`)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1) +
+  theme_minimal() +
+  labs(title = "Percentage mitochondrial reads across 24-hour conditions",
+       x = "Condition",
+       y = "Percent Mito") +
+  stat_compare_means(comparisons = list(c("UN24", "TB24"), c("UN24", "CO24"), c("UN24", "SARS24")), method = "t.test", label = "p.signif")
+
+ggplot(subset_96, aes(x = `orig.ident`, y = percent_mito, fill = `orig.ident`)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1) +
+  theme_minimal() +
+  labs(title = "Percentage mitochondrial reads across 96-hour conditions",
+       x = "Condition",
+       y = "Percent Mito") +
+  stat_compare_means(comparisons = list(c("UN96", "TB96"), c("UN96", "CO96"), c("UN96", "SARS96")), method = "t.test", label = "p.signif")
+
+# Filter features that have less than 50 genes and 50 unique transcript molecules
+table(CO_INF$orig.ident)
+
+CO_INF <- subset(CO_INF, subset = nFeature_RNA > 50 & nCount_RNA > 50)
+table(CO_INF$orig.ident)
+
+# Normalize and identify variable features for each dataset independently
+object_list <- SplitObject(CO_INF, split.by = "orig.ident")
+object_list <- lapply(X = object_list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 5000)
+})
+# Select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = object_list, nfeatures = 5000)
+# Perform integration
+immune.anchors <- FindIntegrationAnchors(object.list = object_list, anchor.features = features, dims = c(1:50))
+save(immune.anchors, file = "path/to/immune_anchors2.Rdata")
+# Create an 'integrated' data assay
+CO_INF_int <- IntegrateData(anchorset = immune.anchors, dims = c(1:50))
+```
+
+```{r add metadata}
+CO_INF_int@meta.data$condition <- c(
+  rep("Uninfected", 4766),
+  rep("Mtb-only", 2406),
+  rep("Co-infected", 2498),
+  rep("SARS-only", 3646),
+  rep("Uninfected", 4475),
+  rep("Mtb-only", 3916),
+  rep("Co-infected", 2292),
+  rep("SARS-only", 1869)
+)
+
+CO_INF_int@meta.data$timepoint <- rep(c("24 hours", "96 hours"), c(13316, 12552))
+
+CO_INF_int@meta.data$donor <- CO_INF@meta.data$best_singlet
+```
+
+```{r integrated analysis}
+# Specify that we will perform downstream analysis on the corrected data
+DefaultAssay(CO_INF_int) <- "RNA"
+CO_INF_int <- Add_Mito_Ribo_Seurat(seurat_object = CO_INF_int, species = "Human", overwrite = T)
+# Original unmodified data still resides in the 'RNA' assay
+DefaultAssay(CO_INF_int) <- "integrated"
+save(CO_INF_int, file = "path/to/CO_INF_int2.Rdata")
+load("path/to/CO_INF_int2.Rdata")
+# Run the standard workflow for visualization and clustering
+mito.genes <- grep("^MT-", rownames(CO_INF_int), value=TRUE)
+ribo.genes.small <- grep("^RPS", rownames(CO_INF_int), value=TRUE)
+ribo.genes.large <- grep("^RPL", rownames(CO_INF_int), value=TRUE)
+all.remove.genes <- c(mito.genes, ribo.genes.small, ribo.genes.large)
+CO_INF_int <- subset(CO_INF_int, features = setdiff(rownames(CO_INF_int), all.remove.genes))
+CO_INF_int <- ScaleData(CO_INF_int, verbose = FALSE, vars.to.regress = c("percent_mito","percent_ribo"))
+CO_INF_int <- RunPCA(CO_INF_int, features = VariableFeatures(object = CO_INF_int))
+VizDimLoadings(CO_INF_int, dims = 1:2, reduction = "pca")
+DimHeatmap(CO_INF_int, dims = 1, cells = 500, balanced = TRUE)
+# Elbow plot to determine dimensionality of the dataset
+ElbowPlot(CO_INF_int)
+
+CO_INF_int <- FindNeighbors(CO_INF_int, reduction = "pca", dims = 1:10)
+CO_INF_int <- FindClusters(CO_INF_int, resolution = 0.5)
+
+# Run non-linear dimensionality reduction
+CO_INF_int <- RunUMAP(CO_INF_int, dims = 1:10)
+
+CO_INF_int$condition <- factor(CO_INF_int$condition, levels = c("Uninfected","Mtb-only","SARS-only","Co-infected"))
+CO_INF_int$orig.ident <- factor(CO_INF_int$orig.ident, levels = c("UN24","TB24","SARS24","CO24","UN96","TB96","SARS96","CO96"))
+
+p1 <- DimPlot(CO_INF_int, reduction = "umap", label = T) + NoLegend()
+p2 <- DimPlot(CO_INF_int, reduction = "umap", label = T) + NoLegend()
+DimPlot(CO_INF_int, reduction = "umap", split.by = "timepoint", label = T)
+DimPlot(CO_INF_int, reduction = "umap", split.by = "condition", label = T)
+CO_INF_int$orig.ident <- factor(CO_INF_int$orig.ident, levels = c("UN24","TB24","SARS24","CO24","UN96","TB96","SARS96","CO96"))
+DimPlot(CO_INF_int, reduction = "umap", split.by = "orig.ident", label = T, ncol = 4)
+```
+
+```{r cluster annotation}
+# Prepare the reference data
+ref1 <- celldex::HumanPrimaryCellAtlasData()
+ref2 <- celldex::MonacoImmuneData()
+
+# Get the counts matrix from the object
+counts.CO_INF <- GetAssayData(CO_INF_int, slot = "counts", assay = "RNA")
+
+# Function to filter counts and references based on common markers
+filterCommonMarkers <- function(ref, counts) {
+  common_markers <- intersect(rownames(ref), rownames(counts))
+  counts_filtered <- counts[common_markers, ]
+  ref_filtered <- ref[common_markers, ]
+  return(list(counts_filtered, ref_filtered))
+}
+
+# Filter counts and references for SingleR predictions
+filtered_data1 <- filterCommonMarkers(ref1, counts.CO_INF)
+filtered_data2 <- filterCommonMarkers(ref2, counts.CO_INF)
+
+# Create SingleR predictions
+createSingleRPrediction <- function(test_counts, ref, labels, clusters) {
+  test_counts_sce <- SingleCellExperiment(
+    assays = list(counts = test_counts),
+    colData = DataFrame(clusters = clusters)
+  )
+  test_counts_sce <- scuttle::logNormCounts(test_counts_sce)
+  singler.pred <- SingleR(test = test_counts_sce@assays@data@listData$logcounts,
+                          ref = ref,
+                          labels = labels,
+                          clusters = test_counts_sce$clusters)
+  return(singler.pred)
+}
+
+# SingleR predictions for filtered data
+singler.pred1 <- createSingleRPrediction(filtered_data1[[1]], ref1, ref1$label.main, CO_INF_int$seurat_clusters)
+singler.pred1_2 <- createSingleRPrediction(filtered_data1[[1]], ref1, ref1$label.fine, CO_INF_int$seurat_clusters)
+singler.pred2 <- createSingleRPrediction(filtered_data2[[1]], ref2, ref2$label.main, CO_INF_int$seurat_clusters)
+singler.pred2_2 <- createSingleRPrediction(filtered_data2[[1]], ref2, ref2$label.fine, CO_INF_int$seurat_clusters)
+
+# Create a function to rename clusters with cell types
+renameClusters <- function(anno_object, singler_results) {
+  celltypes <- singler_results[, 2]
+  names(celltypes) <- rownames(singler_results)
+  renamed_anno <- RenameIdents(anno_object, celltypes)
+  return(renamed_anno)
+}
+
+# Rename clusters with cell types for CO_INF_anno1
+CO_INF_anno1 <- CO_INF_int
+CO_INF_anno1[["old.ident"]] <- Idents(object = CO_INF_anno1)
+CO_INF_anno1 <- renameClusters(CO_INF_anno1, singler.pred1)
+DimPlot(CO_INF_anno1, reduction = "umap", split.by = "orig.ident", label = T, ncol = 4)
+
+# Rename clusters with cell types for CO_INF_anno1_2
+CO_INF_anno1_2 <- CO_INF_int
+CO_INF_anno1_2[["old.ident"]] <- Idents(object = CO_INF_anno1_2)
+CO_INF_anno1_2 <- renameClusters(CO_INF_anno1_2, singler.pred1_2)
+DimPlot(CO_INF_anno1_2, reduction = "umap", split.by = "orig.ident", label = T, ncol = 4)
+
+# Rename clusters with cell types for CO_INF_anno2
+CO_INF_anno2 <- CO_INF_int
+CO_INF_anno2[["old.ident"]] <- Idents(object = CO_INF_anno2)
+CO_INF_anno2 <- renameClusters(CO_INF_anno2, singler.pred2)
+DimPlot(CO_INF_anno2, reduction = "umap", split.by = "orig.ident", label = T, ncol = 4)
+
+# Rename clusters with cell types for CO_INF_anno2_2
+CO_INF_anno2_2 <- CO_INF_int
+CO_INF_anno2_2[["old.ident"]] <- Idents(object = CO_INF_anno2_2)
+CO_INF_anno2_2 <- renameClusters(CO_INF_anno2_2, singler.pred2_2)
+DimPlot(CO_INF_anno2_2, reduction = "umap", split.by = "orig.ident", label = T, ncol = 4)
+
+# Rename clusters with cell types for CO_INF_int
+CO_INF_int[["old.ident"]] <- Idents(object = CO_INF_int)
+celltypes1_2 <- gsub("_", "-", singler.pred1_2[, 2])
+CO_INF_int <- RenameIdents(CO_INF_int, setNames(celltypes1_2, rownames(singler.pred1_2)))
+
+cluster_annotations <- Idents(CO_INF_int)
+cluster_numbers <- CO_INF_int$seurat_clusters
+combined_data <- data.frame(Cluster = cluster_numbers, Annotation = cluster_annotations)
+head(combined_data)
+cluster_annotations <- unique(combined_data[c("Cluster", "Annotation")])
+cluster_annotations_sorted <- cluster_annotations[order(cluster_annotations$Cluster),]
+print(cluster_annotations_sorted)
+
+all.markers <- metadata(singler.pred1_2)$de.genes
+sub.markers <- list("Monocyte_anti-FcgRIIB" = unique(unlist(all.markers$`Monocyte:anti-FcgRIIB`)),
+                    "Monocyte_leukotriene-D4" = unique(unlist(all.markers$`Monocyte:leukotriene_D4`)),
+                    "Neutrophil_GM-CSF_IFNg" = unique(unlist(all.markers$`Neutrophil:GM-CSF_IFNg`)),
+                    "Neutrophil_LPS" = unique(unlist(all.markers$`Neutrophil:LPS`)),
+                    "Neutrophil_uropathogenic-E-coli-UTI89" = unique(unlist(all.markers$`Neutrophil:uropathogenic_E._coli_UTI89`)),
+                    "T_cell_CD4_central_memory" = unique(unlist(all.markers$`T_cell:CD4+_central_memory`)),
+                    "T_cell_CD8" = unique(unlist(all.markers$`T_cell:CD8+`)),
+                    "NK_cell" = unique(unlist(all.markers$`NK_cell`)),
+                    "B_cell_Memory" = unique(unlist(all.markers$`B_cell:Memory`)),
+                    "HSC--G-CSF" = unique(unlist(all.markers$`HSC_-G-CSF`)))
+
+sub.markers.df <- lapply(sub.markers, function(x) data.frame(Value = x))
+write_xlsx(sub.markers.df, path = "cell_annotation_markers.xlsx")
+
+# Generate heatmap for cell type annotation
+plotScoreHeatmap(singler.pred1_2)
+```
+
+```{r visualise annotated clusters}
+# Look at the overall percentage change for each cell type between conditions
+pct1 <- as.data.frame.matrix(table(Idents(CO_INF_int), CO_INF_int$orig.ident))
+pct1 <- pct1[, c("UN24", "TB24", "CO24", "SARS24", "UN96", "TB96", "CO96", "SARS96")]
+pct1_prop_24 <- (pct1[, c("TB24", "CO24", "SARS24")] / pct1[, "UN24"] - 1) * 100
+pct1_prop_96 <- (pct1[, c("TB96", "CO96", "SARS96")] / pct1[, "UN96"] - 1) * 100
+pct1_prop <- round(cbind(pct1_prop_24, pct1_prop_96), 0)
+pct1_prop$Cell_Type <- rownames(pct1_prop)
+pct1_prop_melt <- reshape2::melt(pct1_prop, id.vars = "Cell_Type")
+
+ggplot(pct1_prop_melt, aes(Cell_Type, value)) +
+  geom_bar(stat = "identity", aes(fill = Cell_Type)) + 
+  geom_text(aes(label = paste0(value, "%"), vjust = ifelse(value >= 0, 0, 1))) +
+  scale_y_continuous("Percentage Change Relative to Uninfected Samples") +
+  facet_wrap(~variable, ncol = 3) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggplot(pct1_prop_melt, aes(x = Cell_Type, y = value)) +
+  geom_bar(stat = "identity", aes(fill = Cell_Type), position = position_dodge()) +
+  geom_point(data = donor_data_melt, aes(x = Cell_Type, y = value, group = donor), 
+             position = position_dodge(width = 0.75), size = 1.5, color = "black") +
+  geom_text(aes(label = paste0(value, "%"), vjust = ifelse(value >= 0, 0, 1))) +
+  scale_y_continuous("Percentage Change Relative to Uninfected Samples") +
+  facet_wrap(~variable, ncol = 3) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "none")
+
+# Assess changes in cell types between conditions
+metadata <- CO_INF_int@meta.data
+metadata$Cell_Type <- Idents(CO_INF_int)
+grouped_data <- metadata %>%
+  group_by(donor, Cell_Type, orig.ident) %>%
+  summarise(Count = n(), .groups = 'drop')
+spread_data <- spread(grouped_data, key = orig.ident, value = Count, fill = 0)
+calc_percentage_change <- function(df, condition, baseline) {
+  df %>%
+    mutate("{condition}_change" := case_when(
+      .[[baseline]] == 0 & .[[condition]] == 0 ~ 0,
+      .[[baseline]] == 0 & .[[condition]] != 0 ~ NA_real_,
+      TRUE ~ ((.[[condition]] / .[[baseline]]) - 1) * 100
+    ))
+}
+conditions_24 <- c("TB24", "SARS24", "CO24")
+conditions_96 <- c("TB96", "SARS96", "CO96")
+for(condition in conditions_24) {
+  spread_data <- calc_percentage_change(spread_data, condition, "UN24")
+}
+for(condition in conditions_96) {
+  spread_data <- calc_percentage_change(spread_data, condition, "UN96")
+}
+count_data_long <- reshape2::melt(spread_data, id.vars = c("donor", "Cell_Type"), 
+                        measure.vars = 3:10,
+                        variable.name = "Condition", value.name = "Count")
+percentage_change_data_long <- reshape2::melt(spread_data, id.vars = c("donor", "Cell_Type"), 
+                                    measure.vars = 11:16,
+                                    variable.name = "Condition", value.name = "PercentageChange")
+
+# Plot change in total numbers for each cell type between conditions
+count_data_long_filtered <- count_data_long %>% 
+  filter(Cell_Type != "Neutrophil")
+
+stat_pvalue <- count_data_long_filtered %>%
+  group_by(Cell_Type) %>%
+  rstatix::t_test(Count ~ Condition) %>%
+  filter(p < 0.05) %>%
+  rstatix::add_significance("p") %>%
+  rstatix::add_y_position() %>%
+  mutate(y.position = seq(min(y.position), max(y.position), length.out = n()))
+stat_pvalue <- stat_pvalue %>%
+  mutate(comparison = paste(group1, group2, sep = "-"))
+stats_by_cell_type <- count_data_long_filtered %>%
+  group_by(Cell_Type) %>%
+  summarise(Max_Count = max(Count, na.rm = TRUE),
+            Min_Count = min(Count, na.rm = TRUE),
+            Range = Max_Count - Min_Count)
+stat_pvalue_adjusted <- stat_pvalue %>%
+  left_join(stats_by_cell_type, by = "Cell_Type") %>%
+  mutate(y.position = Max_Count + 0.05 * Range)
+specific_comparisons <- stat_pvalue_adjusted %>%
+  filter(comparison %in% c("UN24-TB24", "UN24-SARS24", "UN24-CO24",
+                           "UN96-TB96", "UN96-SARS96", "UN96-CO96"))
+
+custom_colors <- c("UN24" = "#F8766D", "TB24" = "#7CAE00", "SARS24" = "#00BFC4", "CO24" = "#C77CFF",
+                   "UN96" = "#F8766D", "TB96" = "#7CAE00", "SARS96" = "#00BFC4", "CO96" = "#C77CFF")
+ggplot(count_data_long_filtered, aes(x = Condition, y = Count)) +
+  geom_boxplot(aes(fill = Condition), outlier.shape = NA) +
+  geom_point(aes(shape = donor), position = position_jitterdodge(jitter.width = 0.2), size = 2) +
+  facet_wrap(~ Cell_Type, scales = "free_y", ncol = 10) +
+  geom_vline(xintercept = 4.5, linetype = "dashed", color = "black", size = 1) +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal() +
+  labs(title = "Cell counts per condition at 24 and 96 hours post-infection",
+       x = "", y = "Count") +
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),  
+        legend.position = "bottom") +
+  ggpubr::stat_pvalue_manual(specific_comparisons, label = "p.signif", y.position = specific_comparisons$y.position)
+
+# Percentage change relative to uninfected
+custom_colors2 <- c("TB24_change" = "#7CAE00", "SARS24_change" = "#00BFC4", "CO24_change" = "#C77CFF",
+                   "TB96_change" = "#7CAE00", "SARS96_change" = "#00BFC4", "CO96_change" = "#C77CFF")
+percentage_change_data_long_filtered <- percentage_change_data_long %>% 
+  filter(Cell_Type != "Neutrophil")
+average_percentage_change <- percentage_change_data_long_filtered %>%
+  group_by(Cell_Type, Condition) %>%
+  summarise(AverageChange = mean(PercentageChange, na.rm = TRUE), .groups = 'drop')
+top_positions <- percentage_change_data_long_filtered %>%
+  group_by(Cell_Type, Condition) %>%
+  summarise(TopPosition = max(PercentageChange, na.rm = TRUE) + abs(max(PercentageChange, na.rm = TRUE) * 0.1), .groups = 'drop')
+average_percentage_change <- average_percentage_change %>%
+  left_join(top_positions, by = c("Cell_Type", "Condition")) %>%
+  mutate(LabelPosition = TopPosition)
+
+stat_pvalue <- percentage_change_data_long_filtered %>%
+  group_by(Cell_Type) %>%
+  rstatix::t_test(PercentageChange ~ Condition) %>%
+  filter(p < 0.05) %>%
+  rstatix::add_significance("p") %>%
+  rstatix::add_y_position()
+stat_pvalue <- stat_pvalue %>%
+  mutate(comparison = paste(group1, group2, sep = "-"))
+stats_by_cell_type <- percentage_change_data_long_filtered %>%
+  group_by(Cell_Type) %>%
+  summarise(Max_PercentageChange = max(PercentageChange, na.rm = TRUE),
+            Min_PercentageChange = min(PercentageChange, na.rm = TRUE)) %>%
+  ungroup()
+stat_pvalue_adjusted <- stat_pvalue %>%
+  left_join(stats_by_cell_type, by = "Cell_Type") %>%
+  mutate(y.position = Max_PercentageChange + abs(Max_PercentageChange * 0.1))
+
+ggplot(percentage_change_data_long_filtered, aes(x = Condition, y = PercentageChange, fill = Condition)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_point(aes(shape = donor), position = position_jitterdodge(jitter.width = 0.2), size = 2, color = "black") +
+  geom_text(data = average_percentage_change, aes(x = Condition, y = LabelPosition, label = sprintf("%.1f%%", AverageChange)),
+            color = "black", size = 3, vjust = 0) +
+  facet_wrap(~ Cell_Type, scales = "free_y", ncol = 5) + 
+  scale_fill_manual(values = custom_colors2) + 
+  geom_vline(xintercept = 3.5, linetype = "dashed", color = "black", size = 1) +
+  theme_minimal() +
+  labs(title = "Percentage change in cell counts relative to uninfected",
+       x = "", 
+       y = "Percentage Change") +
+  theme(axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "right")
+  #+ggpubr::stat_pvalue_manual(stat_pvalue_adjusted, label = "p.adj.signif", y.position = stat_pvalue_adjusted$y.position)
+```
+
+```{r DE features}
+CO_INF.markers_cell <- FindAllMarkers(CO_INF_int, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+CO_INF.markers_cell %>%
+  group_by(cluster) %>%
+  slice_max(n = 2, order_by = avg_log2FC)
+CO_INF.markers_cell %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(CO_INF_int, features = top10$gene) + NoLegend()
+top_markers <- CO_INF.markers_cell[-grep("ENS",CO_INF.markers_cell$gene),] %>% 
+  group_by(cluster) %>% 
+  top_n(n = 2, wt = avg_log2FC)
+markers.to.plot <- unique(top_markers$gene)
+dotplot <- DotPlot(CO_INF_int, features = markers.to.plot) + RotatedAxis()
+dotplot + scale_colour_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, 
+                                 limits = c(-2.5, 2.5), space = "Lab", na.value = "grey50")
+saveRDS(CO_INF.markers_cell,"CO_INF_markers_cell.Rds")
+write.csv(CO_INF.markers_cell,"CO_INF_int_markers_cell.csv")
+
+CO_INF_int <- RenameIdents(CO_INF_int, setNames(rownames(singler.pred1_2),celltypes1_2))
+CO_INF.markers_cluster <- FindAllMarkers(CO_INF_int, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+CO_INF.markers_cluster %>%
+  group_by(cluster) %>%
+  slice_max(n = 2, order_by = avg_log2FC)
+CO_INF.markers_cluster %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(CO_INF_int, features = top10$gene) + NoLegend()
+top_markers <- CO_INF.markers_cluster[-grep("ENS",CO_INF.markers_cluster$gene),] %>% 
+  group_by(cluster) %>% 
+  top_n(n = 2, wt = avg_log2FC)
+markers.to.plot <- unique(top_markers$gene)
+dotplot <- DotPlot(CO_INF_int, features = markers.to.plot) + RotatedAxis()
+dotplot + scale_colour_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, 
+                                 limits = c(-2.5, 2.5), space = "Lab", na.value = "grey50")
+saveRDS(CO_INF.markers_cluster,"CO_INF_markers_cluster.Rds")
+write.csv(CO_INF.markers_cluster,"CO_INF_int_markers_cluster.csv")
+```
+
+```{r GO enrichment}
+# per cluster
+library(org.Hs.eg.db)
+deg.ls <- split(rownames(CO_INF.markers_cluster), f = CO_INF.markers_cluster$cluster)
+deg.ls <- deg.ls[lapply(deg.ls, length) > 0]
+names(deg.ls) <- c(
+  "zero", "one", "three", "four", "six", "seven",
+  "nine", "ten", "eleven"
+)
+deg.uls <- unlist(deg.ls)
+deg.uls <- as.data.frame(deg.uls, row.names = names(deg.uls))
+deg.uls$deg.uls <- sub("\\..*", "", deg.uls$deg.uls)
+
+gene_df <- AnnotationDbi::select(org.Hs.eg.db,
+                                 keys = deg.uls$deg.uls,
+                                 columns = c("ENTREZID", "SYMBOL"),
+                                 keytype = "SYMBOL")
+gene_df <- gene_df[!duplicated(gene_df$SYMBOL),]
+deg.uls$entrez <- gene_df$ENTREZID
+deg.uls <- subset(deg.uls, !is.na(entrez))
+
+for (i in 0:8) {
+  cluster_name <- tolower(names(deg.ls)[i + 1])
+  deg.ls[[cluster_name]] <- deg.uls[grep(cluster_name, rownames(deg.uls)), ]$entrez
+}
+deg.ls <- deg.ls[lapply(deg.ls, length) > 0]
+```
+
+```{r more GO analysis}
+library(magrittr)
+library(ReactomePA)
+library(clusterProfiler)
+library(enrichplot)
+library(DOSE)
+
+compKEGG <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichKEGG",
+  pvalueCutoff = 0.01,
+  pAdjustMethod = "BH",
+  organism = "hsa"
+)
+compKEGG_full <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichKEGG",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  organism = "hsa"
+)
+
+compGO <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichGO",
+  pvalueCutoff = 0.001,
+  pAdjustMethod = "BH",
+  OrgDb = org.Hs.eg.db,
+  ont = 'BP'
+)
+compGO_full <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichGO",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH",
+  OrgDb = org.Hs.eg.db,
+  ont = 'BP'
+)
+
+compPathway <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichPathway",
+  pvalueCutoff = 0.001,
+  pAdjustMethod = "BH"
+)
+compPathway_full <- compareCluster(
+  geneCluster = deg.ls,
+  fun = "enrichPathway",
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "BH"
+)
+
+plotEnrichment <- function(data, filter_indices) {
+  data_sub <- data[data$Description %in% data$Description[filter_indices], ]
+  ggplot(data_sub, aes(x = Cluster, y = fct_reorder(Description, GeneRatio))) +
+    geom_point(aes(size = Count, color = p.adjust)) +
+    theme_bw() +
+    scale_colour_gradient(limits = c(0, 0.05), low = "red", high = "blue") +
+    ylab(NULL) +
+    theme(axis.text.y = element_text(size = 8, colour = "black")) +
+    ggtitle("")
+}
+
+compGO_df <- as.data.frame(compGO@compareClusterResult)
+write.csv(as.data.frame(compGO@compareClusterResult), "compGO_results.csv")
+
+compGO_df_sub <- plotEnrichment(compGO_df, c(2, 4, 14, 16, 22, 24, 26, 27, 29, 30, 31, 33, 34, 35, 36, 42, 55, 65, 67, 68, 72, 73, 76, 79, 82, 83, 88, 90, 108, 124, 131, 134, 135, 146, 153, 156, 163, 170, 171, 174, 178, 179, 180, 184))
+
+compGO_df_full <- as.data.frame(compGO_full@compareClusterResult)
+write.csv(as.data.frame(compGO_full@compareClusterResult), "compGO_full_results.csv")
+
+compGO_df_full_sub <- plotEnrichment(compGO_df_full, c(2, 4, 7, 16, 22, 24, 27, 29, 33, 34, 35, 36, 43, 44, 55, 57, 385, 386, 387, 388, 392, 393, 399, 400, 402, 403, 408, 410, 625, 626, 628, 635, 638, 639, 642, 650, 657, 660, 667, 676, 685, 690, 852, 853, 861, 862, 869, 871, 874))
+
+compPath_df <- as.data.frame(compPathway@compareClusterResult)
+write.csv(as.data.frame(compPathway@compareClusterResult), "compPath_results.csv")
+
+compPath_df_full <- as.data.frame(compPathway_full@compareClusterResult)
+write.csv(as.data.frame(compPathway_full@compareClusterResult), "compPath_full_results.csv")
+
+compPath_df_full_sub <- plotEnrichment(compPath_df_full, c(1, 2, 5, 25, 26, 27, 28, 31, 32, 33, 34, 35, 36, 67, 79, 80, 83, 84, 91, 96, 97, 112, 117, 122, 123, 126))
+```
+
+```{r GO between conditions}
+library(SCPA)
+# 24H
+seuratExtract <- function(data, meta1, value_meta1, meta2, value_meta2) {
+  seurat_extract(data, meta1 = meta1, value_meta1 = value_meta1, meta2 = meta2, value_meta2 = value_meta2)
+}
+
+UN_24 <- seuratExtract(CO_INF_int, "condition", "Uninfected", "timepoint", "24 hours")
+TB_24 <- seuratExtract(CO_INF_int, "condition", "Mtb-only", "timepoint", "24 hours")
+CO_24 <- seuratExtract(CO_INF_int, "condition", "Co-infected", "timepoint", "24 hours")
+SARS_24 <- seuratExtract(CO_INF_int, "condition", "SARS-only", "timepoint", "24 hours")
+
+library(msigdbr)
+pathways2 <- read.csv("h_k_r_go_pid_reg_wik.csv", stringsAsFactors = FALSE, header = FALSE)
+colnames(pathways2)[1] <- "Pathway"
+long_data <- pathways2 %>%
+  pivot_longer(
+    cols = -Pathway,                  
+    names_to = "Gene_Column", 
+    values_to = "Genes"   
+  ) %>%
+  dplyr::select(-Gene_Column) %>%     
+  filter(Genes != "")            
+
+list_of_tibbles <- split(long_data, long_data$Pathway)
+filtered_list_of_tibbles <- lapply(list_of_tibbles, function(tbl) {
+  tbl %>% filter(startsWith(Pathway, "GO_"))
+})
+filtered_list_of_tibbles <- Filter(function(tbl) nrow(tbl) > 0, filtered_list_of_tibbles)
+
+TB_24H_path <- compare_pathways(list(UN_24, TB_24), filtered_list_of_tibbles)
+SARS_24H_path <- compare_pathways(list(UN_24, SARS_24), filtered_list_of_tibbles)
+CO_24H_path <- compare_pathways(list(UN_24, CO_24), filtered_list_of_tibbles)
+
+saveRDS(TB_24H_path, "TB_24H_path.Rds")
+TB_24H_path <- readRDS("TB_24H_path.Rds")
+saveRDS(SARS_24H_path, "SARS_24H_path.Rds")
+SARS_24H_path <- readRDS("SARS_24H_path.Rds")
+saveRDS(CO_24H_path, "CO_24H_path.Rds")
+CO_24H_path <- readRDS("CO_24H_path.Rds")
+
+filterAndExtractSigPath <- function(data, fc_threshold, pval_threshold) {
+  sig_path <- data[abs(data$FC) > fc_threshold & data$adjPval < pval_threshold, ]
+  sig_path %>% filter(grepl(pattern = "GO_", ignore.case = TRUE, x = Pathway))
+}
+
+TB_24H_sig_path <- filterAndExtractSigPath(TB_24H_path, 1, 0.05)
+CO_24H_sig_path <- filterAndExtractSigPath(CO_24H_path, 1, 0.05)
+SARS_24H_sig_path <- filterAndExtractSigPath(SARS_24H_path, 1, 0.05)
+
+library(gplots)
+olap_24H <- venn(list(TB_24H_sig_path$Pathway, SARS_24H_sig_path$Pathway, CO_24H_sig_path$Pathway))
+
+# 96H
+UN_96 <- seuratExtract(CO_INF_int, "condition", "Uninfected", "timepoint", "96 hours")
+TB_96 <- seuratExtract(CO_INF_int, "condition", "Mtb-only", "timepoint", "96 hours")
+CO_96 <- seuratExtract(CO_INF_int, "condition", "Co-infected", "timepoint", "96 hours")
+SARS_96 <- seuratExtract(CO_INF_int, "condition", "SARS-only", "timepoint", "96 hours")
+
+TB_96H_path <- compare_pathways(list(UN_96, TB_96), filtered_list_of_tibbles)
+SARS_96H_path <- compare_pathways(list(UN_96, SARS_96), filtered_list_of_tibbles)
+CO_96H_path <- compare_pathways(list(UN_96, CO_96), filtered_list_of_tibbles)
+
+saveRDS(TB_96H_path, "TB_96H_path.Rds")
+TB_96H_path <- readRDS("TB_96H_path.Rds")
+saveRDS(SARS_96H_path, "SARS_96H_path.Rds")
+SARS_96H_path <- readRDS("SARS_96H_path.Rds")
+saveRDS(CO_96H_path, "CO_96H_path.Rds")
+CO_96H_path <- readRDS("CO_96H_path.Rds")
+
+TB_96H_sig_path <- filterAndExtractSigPath(TB_96H_path, 1, 0.05)
+CO_96H_sig_path <- filterAndExtractSigPath(CO_96H_path, 1, 0.05)
+SARS_96H_sig_path <- filterAndExtractSigPath(SARS_96H_path, 1, 0.05)
+
+olap_96H <- venn(list(TB_96H_sig_path$Pathway, SARS_96H_sig_path$Pathway, CO_96H_sig_path$Pathway))
+
+all_pathways24H <- unique(c(TB_24H_sig_path$Pathway, SARS_24H_sig_path$Pathway, CO_24H_sig_path$Pathway))
+all_pathways96H <- unique(c(TB_96H_sig_path$Pathway, SARS_96H_sig_path$Pathway, CO_96H_sig_path$Pathway))
+all_pathways <- unique(c(TB_24H_sig_path$Pathway, SARS_24H_sig_path$Pathway, CO_24H_sig_path$Pathway, TB_96H_sig_path$Pathway, SARS_96H_sig_path$Pathway, CO_96H_sig_path$Pathway))
+pathway_df24H <- data.frame(Pathway = all_pathways24H, 
+                         TB_24H = FALSE, 
+                         SARS_24H = FALSE, 
+                         CO_24H = FALSE)
+pathway_df96H <- data.frame(Pathway = all_pathways96H,
+                         TB_96H = FALSE, 
+                         SARS_96H = FALSE, 
+                         CO_96H = FALSE)
+pathway_df <- data.frame(Pathway = all_pathways, 
+                         TB_24H = FALSE, 
+                         SARS_24H = FALSE, 
+                         CO_24H = FALSE,
+                         TB_96H = FALSE, 
+                         SARS_96H = FALSE, 
+                         CO_96H = FALSE)
+for (path in TB_24H_sig_path$Pathway) {
+  pathway_df24H[pathway_df24H$Pathway == path, "TB_24H"] <- TRUE
+}
+for (path in SARS_24H_sig_path$Pathway) {
+  pathway_df24H[pathway_df24H$Pathway == path, "SARS_24H"] <- TRUE
+}
+for (path in CO_24H_sig_path$Pathway) {
+  pathway_df24H[pathway_df24H$Pathway == path, "CO_24H"] <- TRUE
+}
+for (path in TB_96H_sig_path$Pathway) {
+  pathway_df96H[pathway_df96H$Pathway == path, "TB_96H"] <- TRUE
+}
+for (path in SARS_96H_sig_path$Pathway) {
+  pathway_df96H[pathway_df96H$Pathway == path, "SARS_96H"] <- TRUE
+}
+for (path in CO_96H_sig_path$Pathway) {
+  pathway_df96H[pathway_df96H$Pathway == path, "CO_96H"] <- TRUE
+}
+for (path in TB_24H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "TB_24H"] <- TRUE
+}
+for (path in SARS_24H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "SARS_24H"] <- TRUE
+}
+for (path in CO_24H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "CO_24H"] <- TRUE
+}
+for (path in TB_96H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "TB_96H"] <- TRUE
+}
+for (path in SARS_96H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "SARS_96H"] <- TRUE
+}
+for (path in CO_96H_sig_path$Pathway) {
+  pathway_df[pathway_df$Pathway == path, "CO_96H"] <- TRUE
+}
+
+library(ComplexUpset)
+conditions24H <- colnames(pathway_df24H)[-1]
+conditions96H <- colnames(pathway_df96H)[-1]
+conditions <- colnames(pathway_df)[-1]
+upset(data = pathway_df24H, intersect = conditions24H, 
+      name="Pathway enrichment associated with infection condition at 24 hours post-infection", 
+      min_size = 0,
+      width_ratio = 0.125) +
+    labs(title = "Overlap in pathway enrichment")
+upset(data = pathway_df96H, intersect = conditions96H, 
+      name="Pathway enrichment associated with infection condition and timepoint post-infection", 
+      min_size = 0,
+      width_ratio = 0.125) +
+    labs(title = "Overlap in pathway enrichment")
+upset(data = pathway_df, intersect = conditions, 
+      name="Pathway enrichment associated with infection condition and timepoint post-infection", 
+      min_size = 0,
+      width_ratio = 0.125) +
+    labs(title = "Overlap in pathway enrichment")
+
+# Ratio/Ratio plots
+data <- GetAssayData(CO_INF_int, slot = "data")
+data_df <- as.data.frame(t(data))
+meta_data <- as.data.frame(CO_INF_int@meta.data)
+data_df$cell <- rownames(meta_data)
+meta_data$cell <- rownames(meta_data)
+data_df <- merge(data_df, meta_data[, c("cell", "orig.ident")], by = "cell")
+data_df <- data_df[,-grep("MT-|RPL|RPS", colnames(data_df))]
+
+avg_expression <- data_df %>%
+  group_by(orig.ident) %>%
+  summarise(across(-cell, mean, na.rm = TRUE)) %>%
+  pivot_longer(cols = -orig.ident, names_to = "gene", values_to = "expression")
+
+ratio_data24 <- avg_expression %>%
+  spread(orig.ident, expression) %>%
+  mutate(
+    TB_vs_CO = log2(TB24 + 1) - log2(CO24 + 1),
+    SARS_vs_CO = log2(SARS24 + 1) - log2(CO24 + 1)
+  )
+
+top_genes24 <- ratio_data24 %>%
+  mutate(max_abs_log_ratio = pmax(abs(TB_vs_CO), abs(SARS_vs_CO))) %>%
+  arrange(desc(max_abs_log_ratio)) %>%
+  head(20) %>%
+  pull(gene)
+
+ggplot(ratio_data24, aes(x = TB_vs_CO, y = SARS_vs_CO)) +
+  geom_point(aes(color = gene %in% top_genes24), alpha = 0.5) +
+  scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red")) +
+  geom_text_repel(
+    data = filter(ratio_data24, gene %in% top_genes24),
+    aes(label = gene), 
+    box.padding = 0.35, 
+    point.padding = 0.5,
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Log2 Ratio (Mtb-only vs Co-infected)", 
+       y = "Log2 Ratio (SARS-only vs Co-infected)", 
+       title = "Ratio/Ratio Plot - 24 hours post-infection")
+
+ratio_data96 <- avg_expression %>%
+  spread(orig.ident, expression) %>%
+  mutate(
+    TB_vs_CO = log2(TB96 + 1) - log2(CO96 + 1),
+    SARS_vs_CO = log2(SARS96 + 1) - log2(CO96 + 1)
+  )
+
+top_genes96 <- ratio_data96 %>%
+  mutate(max_abs_log_ratio = pmax(abs(TB_vs_CO), abs(SARS_vs_CO))) %>%
+  arrange(desc(max_abs_log_ratio)) %>%
+  head(20) %>%
+  pull(gene)
+
+ggplot(ratio_data96, aes(x = TB_vs_CO, y = SARS_vs_CO)) +
+  geom_point(aes(color = gene %in% top_genes96), alpha = 0.5) +
+  scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red")) +
+  geom_text_repel(
+    data = filter(ratio_data96, gene %in% top_genes96),
+    aes(label = gene), 
+    box.padding = 0.35, 
+    point.padding = 0.5,
+    size = 3,
+    max.overlaps = Inf
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Log2 Ratio (Mtb-only vs Co-infected)", 
+       y = "Log2 Ratio (SARS-only vs Co-infected)", 
+       title = "Ratio/Ratio Plot - 96 hours post-infection")
+```
+
+```{r pseudobulk}
+# Extract raw counts and metadata to create SingleCellExperiment object
+mito.genes <- grep("^MT-", rownames(CO_INF_int), value=TRUE)
+ribo.genes.small <- grep("^RPS", rownames(CO_INF_int), value=TRUE)
+ribo.genes.large <- grep("^RPL", rownames(CO_INF_int), value=TRUE)
+all.remove.genes <- c(mito.genes, ribo.genes.small, ribo.genes.large)
+CO_INF_int <- subset(CO_INF_int, features = setdiff(rownames(CO_INF_int), all.remove.genes))
+counts <- CO_INF_int@assays$RNA@counts 
+metadata <- CO_INF_int@meta.data
+
+# Set up metadata as desired for aggregation and DE analysis
+metadata$cluster_id <- factor(CO_INF_int@active.ident)
+
+# Create single cell experiment object
+sce <- SingleCellExperiment(assays = list(counts = counts), 
+                            colData = metadata)
+sce$orig.ident <- gsub("_","",sce$orig.ident)
+metadata$orig.ident <- gsub("_","",metadata$orig.ident)
+sce$cluster_id <- gsub("_","-",sce$cluster_id)
+metadata$cluster_id <- gsub("_","-",metadata$cluster_id)
+
+# Identify groups for aggregation of counts
+conditions <- colData(sce)[, c("donor")]
+
+# Acquire necessary metrics for aggregation
+# Named vector of cluster names
+sce$cluster_id <- factor(sce$cluster_id)
+kids <- purrr::set_names(levels(sce$cluster_id))
+kids
+
+# Total number of clusters
+nk <- length(kids)
+nk
+
+# Named vector of sample names
+sids <- purrr::set_names(levels(as.factor(sce$orig.ident)))
+
+# Total number of samples 
+ns <- length(sids)
+ns
+
+# Generate sample level metadata
+# Determine the number of cells per sample
+table(sce$orig.ident)
+
+# Turn named vector into a numeric vector of number of cells per sample
+n_cells <- as.numeric(table(sce$orig.ident))
+
+# Determine how to reoder the samples (rows) of the metadata to match the order of sample names in sids vector
+m <- match(sids, sce$orig.ident)
+
+# Create the sample level metadata by combining the reordered metadata with the number of cells corresponding to each sample.
+ei <- data.frame(colData(sce)[m, ], 
+                 n_cells, row.names = NULL)
+
+# Perform additional QC analysis
+dim(sce)
+
+# Calculate quality control (QC) metrics
+sce_qc <- perCellQCMetrics(sce)
+
+# Get cells w/ few/many detected genes
+sce$is_outlier <- isOutlier(
+  metric = sce_qc$total,
+  nmads = 2, type = "both", log = TRUE)
+
+# Remove outlier cells
+sce <- sce[, !sce$is_outlier]
+dim(sce)
+
+# Remove lowly expressed genes which have less than 10 cells with any counts
+sce <- sce[rowSums(counts(sce) > 1) >= 10, ]
+
+dim(sce)
+
+# Aggregate the counts per sample_id and cluster_id
+
+# Subset metadata to only include the cluster and sample IDs to aggregate across
+groups <- colData(sce)[, c("cluster_id", "donor", "orig.ident")]
+
+# Aggregate across cluster-sample groups
+# install.packages("https://cran.r-project.org/src/contrib/Archive/Matrix.utils/Matrix.utils_0.9.8.tar.gz", type = "source", repos = NULL)
+library(Matrix.utils)
+pb <- Matrix.utils::aggregate.Matrix(t(counts(sce)), 
+                       groupings = groups, fun = "sum") 
+
+class(pb)
+
+dim(pb)
+#338 5021
+
+pb[1:6, 1:6]
+
+# Not every cluster is present in all samples; create a vector that represents how to split samples
+splitf <- sapply(stringr::str_split(rownames(pb), 
+                                    pattern = "_",  
+                                    n = 2), 
+                 `[`, 1)
+
+# Turn into a list and split the list into components for each cluster and transform, so rows are genes and columns are samples and make rownames as the sample IDs
+pb <- split.data.frame(pb, 
+                       factor(splitf)) %>%
+  lapply(function(u) 
+    set_colnames(t(u), 
+                 rownames(u)))
+
+class(pb)
+
+# Explore the different components of list
+str(pb)
+
+# Print out the table of cells in each cluster-sample group
+options(width = 100)
+table(sce$cluster_id, sce$donor)
+
+# Get sample names for each of the cell type clusters
+
+# prep. data.frame for plotting
+get_sample_ids <- function(x){
+  pb[[x]] %>%
+    colnames()
+}
+
+de_samples <- map(1:length(kids), get_sample_ids) %>%
+  unlist()
+de_samples <- sub("^[^_]*_", "", de_samples)
+
+# Get cluster IDs for each of the samples
+
+samples_list <- map(1:length(kids), get_sample_ids)
+
+get_cluster_ids <- function(x){
+  rep(names(pb)[x], 
+      each = length(samples_list[[x]]))
+}
+
+de_cluster_ids <- map(1:length(kids), get_cluster_ids) %>%
+  unlist()
+
+# Create a data frame with the sample IDs, cluster IDs and condition
+
+gg_df <- data.frame(cluster_id = de_cluster_ids,
+                    sample_id = de_samples)
+gg_df <- gg_df %>%
+  separate(col = sample_id, into = c("donor", "condition"), sep = "_")
+
+metadata <- gg_df
+
+metadata$cluster_id <- factor(metadata$cluster_id)
+metadata$sample_id <- paste(metadata$donor, metadata$condition, sep = "_")
+
+clusters <- levels(metadata$cluster_id)
+clusters
+cluster_names <- c("B-cell:Memory","HSC--G-CSF","Monocyte:anti-FcgRIIB","Monocyte:leukotriene-D4","Neutrophil","Neutrophil:GM-CSF-IFNg","Neutrophil:LPS","Neutrophil:uropathogenic-E.-coli-UTI89","NK-cell","T-cell:CD4+-central-memory","T-cell:CD8+")
+
+metadata_list <- list()
+counts_list <- list()
+
+for (i in 1:length(clusters)) {
+  metadata_subset <- metadata[which(metadata$cluster_id == clusters[i]), ]
+  rownames(metadata_subset) <- metadata_subset$sample_id
+  metadata_list[[i]] <- metadata_subset
+  counts_subset <- pb[[clusters[i]]]
+  colnames(counts_subset) <- sub("^[^_]*_", "", colnames(counts_subset))
+  counts_subset <- data.frame(counts_subset[, which(colnames(counts_subset) %in% rownames(metadata_subset))])
+  counts_list[[i]] <- counts_subset
+  all(rownames(metadata_subset) == colnames(counts_subset))
+}
+
+# Assign individual variables for each subset
+B_metadata <- metadata_list[[1]]
+B_counts <- counts_list[[1]]
+H_metadata <- metadata_list[[2]]
+H_counts <- counts_list[[2]]
+Fc_M_metadata <- metadata_list[[3]]
+Fc_M_counts <- counts_list[[3]]
+L_M_metadata <- metadata_list[[4]]
+L_M_counts <- counts_list[[4]]
+N_metadata <- metadata_list[[5]]
+N_counts <- counts_list[[5]]
+GM_N_metadata <- metadata_list[[6]]
+GM_N_counts <- counts_list[[6]]
+LPS_N_metadata <- metadata_list[[7]]
+LPS_N_counts <- counts_list[[7]]
+E_N_counts <- counts_list[[8]]
+E_N_metadata <- metadata_list[[8]]
+NK_metadata <- metadata_list[[9]]
+NK_counts <- counts_list[[9]]
+CD4_T_metadata <- metadata_list[[10]]
+CD4_T_counts <- counts_list[[10]]
+CD8_T_metadata <- metadata_list[[11]]
+CD8_T_counts <- counts_list[[11]]
+
+library(DESeq2)
+# Create a list of cluster names and counts
+cluster_names <- c("B", "H-G-CSF", "Fc monocytes", "Leuko monocytes", "GM-CSF neutrophils", "LPS neutrophils", "E neutrophils", "NK cells", "CD4 T cells", "CD8 T cells")
+count_lists <- list(B_counts, H_counts, Fc_M_counts, L_M_counts, GM_N_counts, LPS_N_counts, E_N_counts, NK_counts, CD4_T_counts, CD8_T_counts)
+metadata_lists <- list(B_metadata, H_metadata, Fc_M_metadata, L_M_metadata, GM_N_metadata, LPS_N_metadata, E_N_metadata, NK_metadata, CD4_T_metadata, CD8_T_metadata)
+
+dds_list <- list()
+rld_list <- list()
+pca_plots_list <- list()
+
+# Create DESeq objects, transform counts, plot PCA
+for (i in 1:length(cluster_names)) {
+  dds <- DESeqDataSetFromMatrix(count_lists[[i]], colData = metadata_lists[[i]], design = ~ condition)
+  dds_list[[i]] <- dds
+  rld <- rlog(dds, blind = TRUE)
+  rld_list[[i]] <- rld
+  pca_plot <- plotPCA(rld, intgroup = "condition", returnData = FALSE)
+  pca_plots_list[[i]] <- pca_plot
+}
+
+library(pheatmap)
+library(gridExtra)
+
+# Create a list to store the correlation matrices
+rld_cor_list <- list()
+
+# Extract rlog matrices and compute pairwise correlation values
+for (i in 1:length(rld_list)) {
+  rld_mat <- assay(rld_list[[i]])
+  rld_cor <- cor(rld_mat)
+  rld_cor_list[[i]] <- rld_cor
+}
+
+# Plot correlation heatmaps
+B_heatmap <- pheatmap(rld_cor_list[[1]], annotation = metadata_list[[1]][, c("condition"), drop = FALSE])
+FcM_heatmap <- pheatmap(rld_cor_list[[2]], annotation = metadata_list[[2]][, c("condition"), drop = FALSE])
+LM_heatmap <- pheatmap(rld_cor_list[[3]], annotation = metadata_list[[3]][, c("condition"), drop = FALSE])
+GMN_heatmap <- pheatmap(rld_cor_list[[4]], annotation = metadata_list[[4]][, c("condition"), drop = FALSE])
+LPSN_heatmap <- pheatmap(rld_cor_list[[5]], annotation = metadata_list[[5]][, c("condition"), drop = FALSE])
+EN_heatmap <- pheatmap(rld_cor_list[[6]], annotation = metadata_list[[6]][, c("condition"), drop = FALSE])
+NK_heatmap <- pheatmap(rld_cor_list[[7]], annotation = metadata_list[[7]][, c("condition"), drop = FALSE])
+CD4_T_heatmap <- pheatmap(rld_cor_list[[8]], annotation = metadata_list[[8]][, c("condition"), drop = FALSE])
+CD8_T_heatmap <- pheatmap(rld_cor_list[[9]], annotation = metadata_list[[9]][, c("condition"), drop = FALSE])
+grid.arrange(grobs = heatmap_list, ncol = 3)
+
+# Define contrasts for DE testing
+contrasts <- list(
+  contrast1 = c("condition", "TB24", "UN24"),
+  contrast2 = c("condition", "SARS24", "UN24"),
+  contrast3 = c("condition", "CO24", "UN24"),
+  contrast4 = c("condition", "TB96", "UN96"),
+  contrast5 = c("condition", "SARS96", "UN96"),
+  contrast6 = c("condition", "CO96", "UN96")
+)
+
+variable_names <- c("B", "H", "FcM", "LM", "GMN", "LPSN", "EN", "NK", "CD4T", "CD8T")
+
+# Perform DE testing and store results
+results_list <- list()
+lfcShrink_list <- list()
+for (i in 1:length(variable_names)) {
+  variable <- variable_names[i]
+  dds <- dds_list[[i]]
+  dds <- DESeq(dds)
+  for (j in 1:length(contrasts)) {
+    contrast <- contrasts[[j]]
+    alpha <- 0.05
+    res <- results(dds, contrast = contrast, alpha = alpha)
+    res_shrink <- lfcShrink(dds, contrast = contrast, res = res, type = "ashr")
+    results_list[[paste(variable, contrasts[[j]][2], sep = "_")]] <- res
+    lfcShrink_list[[paste(variable, contrasts[[j]][2], sep = "_")]] <- res_shrink
+  }
+}
+
+# Save significance tables as csv files
+writeResultsToCSV <- function(results_list, padj_cutoff = 0.05) {
+  for (name in names(results_list)) {
+    name_parts <- strsplit(name, "_")[[1]]
+    cell_type <- name_parts[1]
+    condition <- name_parts[2]
+    res_tbl <- results_list[[name]] %>%
+      data.frame() %>%
+      rownames_to_column(var = "gene") %>%
+      as_tibble()
+    filtered_res_tbl <- res_tbl %>%
+      filter(padj < padj_cutoff)
+    file_name_all <- paste0("results/", cell_type, "_", condition, "_all_genes.csv")
+    file_name_filtered <- paste0("results/", cell_type, "_", condition, "_sig_genes.csv")
+    write.csv(res_tbl, file_name_all, quote = FALSE, row.names = FALSE)
+    write.csv(filtered_res_tbl, file_name_filtered, quote = FALSE, row.names = FALSE)
+  }
+}
+
+writeResultsToCSV(results_list, 0.05)
+```
+
+```{r GO analysis on pseudo}
+# Perform enrichGO on sig genes from pseudobulk analysis
+file.paths <- list.files(path = "path/to/results", pattern = "*_sig_genes.csv", full.names = TRUE)
+df_list <- lapply(file.paths,function(i){read.csv(i, header = TRUE)})
+file.paths <- gsub("path/to/results/","",file.paths)
+file.paths <- gsub("_sig_genes.csv","",file.paths)
+names(df_list) <- file.paths
+
+library(biomaRt)
+human = useEnsembl("ensembl", dataset = "hsapiens_gene_ensembl", mirror = "useast")
+listFilters(human)
+ensembl_dataset = useDataset("hsapiens_gene_ensembl", mart = human)
+genome <- listDatasets(ensembl_dataset)[(listDatasets(ensembl_dataset)=="hsapiens_gene_ensembl"),]$version
+attributes = listAttributes(ensembl_dataset)
+ensembl = getBM(attributes = c("ensembl_gene_id","external_gene_name","entrezgene_id","transcript_length","gene_biotype","percentage_gene_gc_content","chromosome_name","start_position","end_position"),
+                mart = ensembl_dataset)
+ensembl = dplyr::rename(ensembl, gene_id = ensembl_gene_id, gene_name = external_gene_name, entrez = entrezgene_id, length = transcript_length, biotype = gene_biotype, GC_content = percentage_gene_gc_content, Chr = chromosome_name, GeneStart = start_position, GeneEnd = end_position)
+gn2gi <- function(x){
+  genes <- ensembl[match(x, ensembl$gene_name),]
+  x <- genes$gene_id
+  x
+}
+
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+variables <- c("H", "FcM", "GMN", "LPSN", "EN", "NK", "B", "CD4T", "CD8T")
+suffixes <- c("TB24", "SARS24", "CO24", "TB96", "SARS96", "CO96")
+
+ego_results <- list()
+clust_sum_results <- list()
+dotplots_list <- list()
+
+for (variable in variables) {
+  for (suffix in suffixes) {
+    df_name <- paste(variable, suffix, sep = "_")
+    if (df_name %in% names(df_list)) {
+      df <- df_list[[df_name]]
+      ego_result <- enrichGO(
+        gene = gn2gi(df$gene),
+        universe = gn2gi(rownames(CO_INF_int)),
+        keyType = "ENSEMBL",
+        OrgDb = org.Hs.eg.db,
+        ont = "BP",
+        pAdjustMethod = "BH",
+        qvalueCutoff = 0.05,
+        readable = TRUE
+      )
+      if (!is.null(ego_result)) {
+        clust_sum_result <- data.frame(ego_result)
+        ego_results[[paste(variable, "ego", suffix, sep = "_")]] <- ego_result
+        clust_sum_results[[paste(variable, "clust_sum", suffix, sep = "_")]] <- clust_sum_result
+        dotplot_obj <- dotplot(ego_result, showCategory = 50)
+        dotplots_list[[paste(variable, "dotplot", suffix, sep = "_")]] <- dotplot_obj
+      }
+    }
+  }
+}
+```
+
+```{r venn diagrams}
+# Venn diagrams of sig genes for each condition for each cell type
+Fc_M_olap_24H <- gplots::venn(list(df_list$FcM_TB24$gene,df_list$FcM_SARS24$gene,df_list$FcM_CO24$gene))
+Fc_M_olap_96H <- gplots::venn(list(df_list$FcM_TB96$gene,df_list$FcM_SARS96$gene,df_list$FcM_CO96$gene))
+GM_N_olap_24H <- gplots::venn(list(df_list$GMN_TB24$gene,df_list$GMN_SARS24$gene,df_list$GMN_CO24$gene))
+GM_N_olap_96H <- gplots::venn(list(df_list$GMN_TB96$gene,df_list$GMN_SARS96$gene,df_list$GMN_CO96$gene))
+LPS_N_olap_24H <- gplots::venn(list(df_list$LPSN_TB24$gene,df_list$LPSN_SARS24$gene,df_list$LPSN_CO24$gene))
+LPS_N_olap_96H <- gplots::venn(list(df_list$LPSN_TB96$gene,df_list$LPSN_SARS96$gene,df_list$LPSN_CO96$gene))
+E_N_olap_24H <- gplots::venn(list(df_list$EN_TB24$gene,df_list$EN_SARS24$gene,df_list$EN_CO24$gene))
+E_N_olap_96H <- gplots::venn(list(df_list$EN_TB96$gene,df_list$EN_SARS96$gene,df_list$EN_CO96$gene))
+NK_olap_24H <- gplots::venn(list(df_list$NK_TB24$gene,df_list$NK_SARS24$gene,df_list$NK_CO24$gene))
+NK_olap_96H <- gplots::venn(list(df_list$NK_TB96$gene,df_list$NK_SARS96$gene,df_list$NK_CO96$gene))
+CD4_T_olap_24H <- gplots::venn(list(df_list$CD4T_TB24$gene,df_list$CD4T_SARS24$gene,df_list$CD4T_CO24$gene))
+CD4_T_olap_96H <- gplots::venn(list(df_list$CD4T_TB96$gene,df_list$CD4T_SARS96_sig_genes$gene,df_list$CD4T_CO96$gene))
+CD8_T_olap_24H <- gplots::venn(list(df_list$CD8T_TB24$gene,df_list$CD8T_SARS24$gene,df_list$CD8T_CO24$gene))
+CD8_T_olap_96H <- gplots::venn(list(df_list$CD8T_TB96$gene,df_list$CD8T_SARS96$gene,df_list$CD8T_CO96$gene))
+```
+
+```{r BTM analysis}
+# tmod analysis of intersecting significant genes between conditions
+library(tmod)
+cell_types <- c("Monocytes", "Neutrophils (GM-CSF)", "Neutrophils (LPS)", "NK cells", "CD4 T cells", "CD8 T cells")
+datasets <- list(
+  mono_TB_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`A`, bg = df_list$FcM_TB24$gene, condition = "Mtb-only"),
+  mono_SARS_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`B`, bg = df_list$FcM_SARS24$gene, condition = "SARS-only"),
+  mono_CO_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`C`, bg = df_list$FcM_CO24$gene, condition = "Co-infected"),
+  mono_TB_SARS_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`A:B`, bg = df_list$FcM_SARS24$gene, condition = "Mtb-only & SARS-only"),
+  mono_TB_CO_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`A:C`, bg = df_list$FcM_CO24$gene, condition = "Mtb-only & Co-infected"),
+  mono_SARS_CO_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`B:C`, bg = df_list$FcM_SARS24$gene, condition = "SARS-only & Co-infected"),
+  mono_ALL_24 = list(fg = attr(Fc_M_olap_24H, "intersections")$`A:B:C`, bg = df_list$FcM_CO24$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  mono_TB_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`A`, bg = df_list$FcM_TB96$gene, condition = "Mtb-only"),
+  mono_SARS_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`B`, bg = df_list$FcM_SARS96$gene, condition = "SARS-only"),
+  mono_CO_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`C`, bg = df_list$FcM_SARS96$gene, condition = "Co-infected"),
+  mono_TB_SARS_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`A:B`, bg = df_list$FcM_SARS96$gene, condition = "Mtb-only & SARS-only"),
+  mono_TB_CO_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`A:C`, bg = df_list$FcM_CO96$gene, condition = "Mtb-only & Co-infected"),
+  mono_SARS_CO_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`B:C`, bg = df_list$FcM_CO96$gene, condition = "SARS-only & Co-infected"),
+  mono_SARS_CO_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`B:C`, bg = df_list$FcM_SARS96$gene, condition = "SARS-only & Co-infected"),
+  mono_ALL_96 = list(fg = attr(Fc_M_olap_96H, "intersections")$`A:B:C`, bg = df_list$FcM_CO96$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  GMN_TB_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`A`, bg = df_list$GMN_TB24$gene, condition = "Mtb-only"),
+  GMN_SARS_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`B`, bg = df_list$GMN_SARS24$gene, condition = "SARS-only"),
+  GMN_CO_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`C`, bg = df_list$GMN_CO24$gene, condition = "Co-infected"),
+  GMN_TB_SARS_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`A:B`, bg = df_list$GMN_SARS24$gene, condition = "Mtb-only & SARS-only"),
+  GMN_TB_CO_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`A:C`, bg = df_list$GMN_CO24$gene, condition = "Mtb-only & Co-infected"),
+  GMN_SARS_CO_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`B:C`, bg = df_list$GMN_CO24$gene, condition = "SARS-only & Co-infected"),
+  GMN_ALL_24 = list(fg = attr(GM_N_olap_24H, "intersections")$`A:B:C`, bg = df_list$GMN_CO24$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  GMN_TB_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`A`, bg = df_list$GMN_TB96$gene, condition = "Mtb-only"),
+  GMN_SARS_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`B`, bg = df_list$GMN_SARS96$gene, condition = "SARS-only"),
+  GMN_CO_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`C`, bg = df_list$GMN_CO96$gene, condition = "Co-infected"),
+  GMN_TB_SARS_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`A:B`, bg = df_list$GMN_SARS96$gene, condition = "Mtb-only & SARS-only"),
+  GMN_TB_CO_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`A:C`, bg = df_list$GMN_CO96$gene, condition = "Mtb-only & Co-infected"),
+  GMN_SARS_CO_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`B:C`, bg = df_list$GMN_CO96$gene, condition = "SARS-only & Co-infected"),
+  GMN_ALL_96 = list(fg = attr(GM_N_olap_96H, "intersections")$`A:B:C`, bg = df_list$GMN_CO96$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  LPSN_TB_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`A`, bg = df_list$LPSN_TB24$gene, condition = "Mtb-only"),
+  LPSN_SARS_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`B`, bg = df_list$LPSN_SARS24$gene, condition = "SARS-only"),
+  LPSN_CO_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`C`, bg = df_list$LPSN_CO24$gene, condition = "Co-infected"),
+  LPSN_TB_SARS_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`A:B`, bg = df_list$LPSN_SARS24$gene, condition = "Mtb-only & SARS-only"),
+  LPSN_TB_CO_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`A:C`, bg = df_list$LPSN_CO24$gene, condition = "Mtb-only & Co-infected"),
+  LPSN_SARS_CO_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`B:C`, bg = df_list$LPSN_CO24$gene, condition = "SARS-only & Co-infected"),
+  LPSN_ALL_24 = list(fg = attr(LPS_N_olap_24H, "intersections")$`A:B:C`, bg = df_list$LPSN_CO24$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  LPSN_TB_96 = list(fg = attr(LPS_N_olap_96H, "intersections")$`A`, bg = df_list$LPSN_TB96$gene, condition = "Mtb-only"),
+  LPSN_CO_96 = list(fg = attr(LPS_N_olap_96H, "intersections")$`C`, bg = df_list$LPSN_CO96$gene, condition = "Co-infected"),
+  LPSN_TB_CO_96 = list(fg = attr(LPS_N_olap_96H, "intersections")$`A:C`, bg = df_list$LPSN_CO96$gene, condition = "Mtb-only & Co-infected"),
+  LPSN_ALL_96 = list(fg = attr(LPS_N_olap_96H, "intersections")$`A:B:C`, bg = df_list$LPSN_CO96$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  EN_TB_24 = list(fg = attr(E_N_olap_24H, "intersections")$`A`, bg = df_list$EN_TB24$gene, condition = "Mtb-only"),
+  EN_SARS_24 = list(fg = attr(E_N_olap_24H, "intersections")$`B`, bg = df_list$EN_SARS24$gene, condition = "SARS-only"),
+  EN_CO_24 = list(fg = attr(E_N_olap_24H, "intersections")$`C`, bg = df_list$EN_CO24$gene, condition = "Co-infected"),
+  EN_TB_SARS_24 = list(fg = attr(E_N_olap_24H, "intersections")$`A:B`, bg = df_list$EN_SARS24$gene, condition = "Mtb-only & SARS-only"),
+  EN_TB_CO_24 = list(fg = attr(E_N_olap_24H, "intersections")$`A:C`, bg = df_list$EN_CO24$gene, condition = "Mtb-only & Co-infected"),
+  EN_SARS_CO_24 = list(fg = attr(E_N_olap_24H, "intersections")$`B:C`, bg = df_list$EN_CO24$gene, condition = "SARS-only & Co-infected"),
+  EN_ALL_24 = list(fg = attr(E_N_olap_24H, "intersections")$`A:B:C`, bg = df_list$EN_CO24$gene, condition = "Mtb-only, SARS-only & Co-infected"),
+  EN_TB_96 = list(fg = attr(E_N_olap_96H, "intersections")$`A`, bg = df_list$EN_TB96$gene, condition = "Mtb-only"),
+  NK_SARS_24 = list(fg = attr(NK_olap_24H, "intersections")$`B`, bg = df_list$NK_SARS24$gene, condition = "SARS-only"),
+  NK_CO_24 = list(fg = attr(NK_olap_24H, "intersections")$`C`, bg = df_list$NK_CO24$gene, condition = "Co-infected"),
+  NK_SARS_CO_24 = list(fg = attr(NK_olap_24H, "intersections")$`B:C`, bg = df_list$NK_SARS24$gene, condition = "SARS-only & Co-infected"),
+  NK_SARS_96 = list(fg = attr(NK_olap_96H, "intersections")$`B`, bg = df_list$NK_SARS96$gene, condition = "SARS-only"),
+  NK_CO_96 = list(fg = attr(NK_olap_96H, "intersections")$`C`, bg = df_list$NK_CO96$gene, condition = "Co-infected"),
+  NK_SARS_CO_96 = list(fg = attr(NK_olap_96H, "intersections")$`B:C`, bg = df_list$NK_SARS96$gene, condition = "SARS-only & Co-infected"),
+  CD4T_SARS_24 = list(fg = attr(CD4_T_olap_24H, "intersections")$`B`, bg = df_list$CD4T_SARS24$gene, condition = "SARS-only"),
+  CD4T_CO_24 = list(fg = attr(CD4_T_olap_24H, "intersections")$`C`, bg = df_list$CD4T_CO24$gene, condition = "Co-infected"),
+  CD4T_SARS_CO_24 = list(fg = attr(CD4_T_olap_24H, "intersections")$`B:C`, bg = df_list$CD4T_SARS24$gene, condition = "SARS-only & Co-infected"),
+  CD4T_TB_96 = list(fg = attr(CD4_T_olap_96H, "intersections")$`A`, bg = df_list$CD4T_TB96$gene, condition = "Mtb-only"),
+  CD4T_CO_96 = list(fg = attr(CD4_T_olap_96H, "intersections")$`C`, bg = df_list$CD4T_CO96$gene, condition = "Co-infected"),
+  CD4T_TB_CO_96 = list(fg = attr(CD4_T_olap_96H, "intersections")$`A:C`, bg = df_list$CD4T_CO96$gene, condition = "Mtb-only & Co-infected"),
+  CD8T_CO_24 = list(fg = attr(CD8_T_olap_24H, "intersections")$`C`, bg = df_list$CD8T_SARS24$gene, condition = "SARS-only"),
+  CD8T_CO_96 = list(fg = attr(CD8_T_olap_96H, "intersections")$`C`, bg = df_list$CD8T_SARS96$gene, condition = "SARS-only")
+)
+
+results_list <- list()
+for (dataset_name in names(datasets)) {
+  fg <- datasets[[dataset_name]]$fg
+  bg <- unique_genes
+  test_result <- tmodHGtest(
+    fg = fg,
+    bg = bg,
+    modules = NULL,
+    qval = 0.05,
+    order.by = "pval",
+    filter = FALSE,
+    mset = "all",
+    cols = "Title",
+    nodups = TRUE
+  )
+
+  if (!is.null(test_result) && nrow(test_result) > 0) {
+    name_parts <- strsplit(dataset_name, "_")[[1]]
+    cell_type <- name_parts[1]
+    timepoint <- name_parts[length(name_parts)]
+    condition <- paste(name_parts[-c(1, length(name_parts))], collapse = "_")
+    results_list[[dataset_name]] <- list(
+      cell_type = cell_type,
+      condition = condition,
+      timepoint = timepoint,
+      test_result = test_result
+    )
+  }
+}
+
+filtered_results_list <- lapply(results_list, function(item) {
+  if (!is.null(item$test_result) && nrow(item$test_result) > 0) {
+    return(item)
+  }
+  NULL
+})
+filtered_results_list <- Filter(Negate(is.null), filtered_results_list)
+
+combined_df <- data.frame(ID = character(), Title = character(), 
+                          b = numeric(), B = numeric(), n = numeric(), 
+                          N = numeric(), E = numeric(), P.Value = numeric(), 
+                          adj.P.Val = numeric(), cell_type = character(), 
+                          condition = character(), timepoint = character(), 
+                          stringsAsFactors = FALSE)
+
+for(item in filtered_results_list) {
+  temp_df <- cbind(item$test_result, 
+                   cell_type = item$cell_type, 
+                   condition = item$condition, 
+                   timepoint = item$timepoint)
+  combined_df <- rbind(combined_df, temp_df)
+}
+combined_df <- na.omit(combined_df)
+
+melted_df <- reshape2::melt(combined_df, id.vars = c("ID", "Title", "cell_type", "condition", "timepoint"))
+df_24 <- combined_df %>% filter(timepoint == "24")
+df_96 <- combined_df %>% filter(timepoint == "96")
+df_24$cell_type <- factor(df_24$cell_type, levels = c("mono","GMN","LPSN","EN","NK","CD4T","CD8T"))
+df_24$condition <- factor(df_24$condition, levels = c("SARS","CO","SARS_CO"))
+
+create_plot <- function(df) {
+  ggplot(df, aes(x = condition, y = Title, size = E, color = adj.P.Val)) +
+    geom_point() +
+    scale_color_gradient(low = "red", high = "purple") +
+    facet_wrap(~cell_type, ncol = 4) +
+    theme_bw() +
+    labs(title = paste("Plot for Timepoint", unique(df$timepoint)), 
+         x = "Condition", y = "Title", 
+         color = "Adjusted P-Value", size = "Effect size")
+}
+
+plot_24 <- create_plot(df_24)
+plot_24
+plot_96 <- create_plot(df_96)
+plot_96
+```
+
+```{r heatmaps from sig genes}
+# Heatmaps
+heat_colors <- colorRampPalette(c("blue", "white", "red"))(100) 
+prepare_data_for_heatmap <- function(dds, metadata, threshold = 10) {
+    dds <- dds[rowMeans(counts(dds)) >= threshold, ]
+    dds <- estimateSizeFactors(dds)
+    norm_counts <- counts(dds, normalized = TRUE)
+    norm_counts <- norm_counts[!rowSums(is.na(norm_counts) | is.infinite(norm_counts)) > 0, ]
+    list(norm_counts = norm_counts, metadata = metadata)
+}
+
+plot_heatmaps <- function(data_list, metadata_lists) {
+    heatmap_list <- list()
+    for (i in seq_along(data_list)) {
+        norm_counts <- data_list[[i]]$norm_counts
+        if("condition" %in% colnames(metadata_lists[[i]])) {
+            metadata <- metadata_lists[[i]][, "condition", drop = FALSE]
+        } else {
+            message("Condition column not found in metadata for dataset ", i)
+            next
+        }
+        if ("MALAT1" %in% rownames(norm_counts)) {
+            norm_counts <- norm_counts[rownames(norm_counts) != "MALAT1", ]
+        }
+        log_norm_counts <- log1p(norm_counts)
+        if (is.null(nrow(log_norm_counts)) || nrow(log_norm_counts) < 2 ||
+            is.null(ncol(log_norm_counts)) || ncol(log_norm_counts) < 2) {
+            message("Skipping a dataset: not enough data for clustering.")
+            next
+        }
+        
+        title <- paste("Dataset", i)
+        heatmap <- pheatmap(
+            log_norm_counts,
+            annotation_col = metadata,
+            show_colnames = FALSE,
+            show_rownames = FALSE,
+            annotation_legend = FALSE,
+            treeheight_row = 0, 
+            treeheight_col = 0,
+            silent = TRUE,
+            main = title
+        )
+        heatmap_list[[i]] <- heatmap$gtable
+    }
+    heatmap_list
+}
+
+heatmap_list <- plot_heatmaps(prepared_data_list, metadata_lists)
+heatmap_list_sub <- heatmap_list[c(3,5:7,10)]
+
+nrow_grid <- 2
+ncol_grid <- ceiling(length(heatmap_list_sub) / nrow_grid)
+do.call(grid.arrange, c(heatmap_list_sub, nrow = nrow_grid, ncol = ncol_grid))
+```
